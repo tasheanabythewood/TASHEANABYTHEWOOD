@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cincinnati 311 service performance | [YOUR NAME]</title>
+<meta name="description" content="An operations analysis of 517,287 Cincinnati 311 service requests: where the city misses its service commitments, why, and what to do about it.">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap">
+    <a class="name" href="index.html">[YOUR NAME]</a>
+    <nav aria-label="Main">
+      <a href="index.html#projects">Projects</a>
+      <a href="index.html#about">About</a>
+      <a href="index.html#contact">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <p class="meta">Operations analytics case study</p>
+    <h1>A city service fails every summer, and the fix is not a longer promise</h1>
+    <p class="lede prose">517,287 Cincinnati 311 service requests, 2023 to 2026.
+       Which services miss the city's own completion commitments, what drives the
+       misses, and where capacity should go.</p>
+    <p class="meta">Python, SQL, DuckDB, dimensional modelling &middot;
+       Data as of 18 September 2026</p>
+  </div>
+</div>
+
+<main id="main" class="wrap">
+
+<div class="takeaway">
+  <h2>Executive takeaway</h2>
+  <p><strong>Bulky-waste collection misses its 14-day commitment in a concentrated,
+     predictable window every year.</strong> In 2024, 84 percent of the service's
+     annual missed commitments fell in four months. The service runs at 95 to 99
+     percent for the rest of the year.</p>
+  <p>The gap is not demand: July 2026 carried only 10 percent more volume than
+     March and lost 21 percentage points. <strong>Fund seasonal capacity for June
+     to September; do not lengthen the commitment.</strong> Lengthening it has
+     already been tried, during the off-season, and demonstrated nothing.</p>
+</div>
+
+<div class="toc" aria-label="Contents">
+  <strong>On this page</strong>
+  <ol>
+    <li><a href="#question">The decision this answers</a></li>
+    <li><a href="#data">The data, and what it cannot tell you</a></li>
+    <li><a href="#checks">What validation changed</a></li>
+    <li><a href="#findings">Findings</a></li>
+    <li><a href="#ruled-out">What I ruled out</a></li>
+    <li><a href="#recommendation">Recommendation and trade-offs</a></li>
+    <li><a href="#measure">How to tell whether it worked</a></li>
+    <li><a href="#limits">Limitations</a></li>
+    <li><a href="#build">How it was built</a></li>
+  </ol>
+</div>
+
+<section id="question" class="prose">
+<h2>The decision this answers</h2>
+<p>Cincinnati publishes a completion commitment with every 311 service request.
+   Some services meet it and some do not. The question for an operations lead is
+   where to add capacity, and where to instead reset a commitment the city is not
+   meeting.</p>
+<p>Two candidates emerged from the data. They need opposite responses.</p>
+
+<div class="table-scroll">
+<table>
+  <caption>Two failing services, two different problems</caption>
+  <thead>
+    <tr><th scope="col"></th><th scope="col">Bulky collection</th>
+        <th scope="col">Residential building inspection</th></tr>
+  </thead>
+  <tbody>
+    <tr><th scope="row">Volume</th><td>117,670 requests, 22.7% of all intake</td>
+        <td>16,782 requests</td></tr>
+    <tr><th scope="row">Commitment</th><td>14 days</td><td>365 days</td></tr>
+    <tr><th scope="row">Failure pattern</th><td>Sharp, seasonal, recovers each autumn</td>
+        <td>Persistent, accumulating, does not recover</td></tr>
+    <tr><th scope="row">Overdue open cases</th><td>1,527, median 58 days past due</td>
+        <td>3,389, median 420 days past due</td></tr>
+    <tr><th scope="row">Response</th><td><strong>Add capacity</strong></td>
+        <td><strong>Triage the backlog first</strong></td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<section id="data" class="prose">
+<h2>The data, and what it cannot tell you</h2>
+<p>Every non-emergency service request created between 1 January 2023 and
+   31 August 2026, pulled from the City of Cincinnati open data portal:
+   <strong>517,287 records across 70 fields</strong>, snapshotted on
+   18 September 2026 with its filter, row count and file hash recorded so any
+   figure here can be traced to a specific extract.</p>
+<p>Three things the dataset does not contain, stated up front because they bound
+   every conclusion below:</p>
+<ul>
+  <li><strong>It records reports, not incidents.</strong> Request volume reflects
+      what residents choose to report and through which channel.</li>
+  <li><strong>Response timeliness cannot be measured at all.</strong> The field
+      recording when work actually began is blank on 97.8 percent of rows, so only
+      completion timeliness is reported.</li>
+  <li><strong>Closure codes are undefined.</strong> The city publishes no value
+      list for request status, so some closures are treated as completed service
+      on an assumption. That assumption is tested rather than buried; see
+      <a href="#limits">limitations</a>.</li>
+</ul>
+</section>
+
+<section id="checks" class="prose">
+<h2>What validation changed</h2>
+<p>Three findings I had already drawn were wrong, and integrity checks caught each
+   one. They are listed here because they are the reason to believe the rest.</p>
+
+<h3>The published field definition contradicts the data</h3>
+<p>The city's data dictionary states the completion clock starts when work begins.
+   The data starts it at submission, on <strong>517,214 of 517,214 testable
+   rows</strong>, without exception. The observed behaviour is used throughout and
+   the conflict is documented rather than resolved silently.</p>
+
+<h3>One service code carries four different names</h3>
+<p>Service descriptions are not a stable identity: 695 code-and-description pairs
+   exist across only 524 codes, and <strong>63 percent of all requests sit under a
+   code carrying more than one concurrent description</strong>. An earlier reading
+   of the data showed a new service type absorbing volume from an old one. It was
+   the same code relabelled. Grouping moved to the code.</p>
+
+<h3>A whitespace difference hid 29 percent of a service</h3>
+<p>Litter on private property appears as both <code>LITTER, PRIVATE PROPERTY</code>
+   and <code>LITTER,&nbsp;&nbsp;PRIVATE PROPERTY</code>. The difference is one
+   space. Matching on the text dropped 4,598 of 15,824 requests from that service.</p>
+
+<div class="caution">
+  <p><strong>The censoring trap.</strong> A request counted as on time the moment
+     it closes, even with its deadline still in the future, admits only the fast
+     closers from a recent cohort. Uncorrected, residential inspection read
+     <strong>100 percent on time for 2026</strong> because none of its 2026
+     requests is due until 2027. Every trend here is restricted to requests whose
+     committed date had actually passed.</p>
+</div>
+</section>
+
+<section id="findings">
+<div class="prose">
+<h2>Findings</h2>
+<h3>1. The failure is seasonal, and it repeats</h3>
+</div>
+
+<figure>
+  <img src="assets/charts/01-bulky-monthly-on-time.png"
+       alt="Line chart of the share of Cincinnati bulky-collection requests meeting the city's 14-day commitment, each month from January 2024 to August 2026. The rate sits between 95 and 99 percent through winter and spring in every year, then falls sharply each summer, reaching 36.6 percent in August 2024, 5.1 percent in August 2025 and 68.8 percent in August 2026. June to September is shaded in each year. 2025 declined from February onward and did not recover until October.">
+  <figcaption>2025 was an outlier: a seven-month decline bottoming at 5.1 percent
+    in August, with a median collection time of 24 days against a 14-day
+    commitment. 2026 is materially better. August 2026 closed at a 12-day median,
+    the fastest August of the three years, and still sits on the same curve.</figcaption>
+</figure>
+
+<div class="prose">
+<h3>2. Demand does not explain it</h3>
+<p>Holding the service constant and comparing March with July in each year:</p>
+</div>
+
+<figure>
+  <img src="assets/charts/03-volume-vs-on-time.png"
+       alt="Paired bar chart comparing the bulky-collection on-time rate in March and July for 2024, 2025 and 2026. March is high in 2024 and 2026 at 97.9 and 97.3 percent, while July falls to 62.8 and 76.2 percent. In 2025 March is already depressed at 63.1 percent and July falls to 8.5 percent. Annotations show July carried 22, 2 and 10 percent more volume than March respectively, far too little to account for losses of 35, 55 and 21 percentage points.">
+  <figcaption>July 2026 carried 10 percent more volume than March and lost 21
+    points. In 2025 the volume difference was 2 percent and the loss was 55 points.
+    The number of requests arriving is not sufficient to explain the drop, which
+    makes identifying the real constraint the first thing to do before spending
+    money.</figcaption>
+</figure>
+
+<div class="prose">
+<h3>3. Summer demand is growing faster than the trough</h3>
+<div class="table-scroll">
+<table>
+  <caption>Bulky collection, average monthly requests</caption>
+  <thead><tr><th scope="col">Year</th><th scope="col" class="num">Jan&ndash;Feb</th>
+    <th scope="col" class="num">Jun&ndash;Aug</th><th scope="col" class="num">Summer lift</th></tr></thead>
+  <tbody>
+    <tr><th scope="row">2024</th><td class="num">2,232</td><td class="num">2,874</td><td class="num">+29%</td></tr>
+    <tr><th scope="row">2025</th><td class="num">2,066</td><td class="num">3,060</td><td class="num">+48%</td></tr>
+    <tr><th scope="row">2026</th><td class="num">2,188</td><td class="num">3,532</td><td class="num">+61%</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A capacity plan built on the 2024 seasonal profile will be undersized by 2027.</p>
+
+<h3>4. A different problem: an old backlog in one department</h3>
+</div>
+
+<figure>
+  <img src="assets/charts/04-backlog-age.png"
+       alt="Horizontal stacked bar chart of the eight services with the most open overdue requests, split by how long each has been past its committed date. Residential building inspection is by far the largest at 3,389 requests, of which more than half are over a year overdue. Bulky collection has 1,527 overdue but almost none older than a year. Several smaller building and permit services are almost entirely over a year old.">
+  <figcaption>The Cincinnati Building Department holds <strong>51.5 percent of all
+    overdue requests citywide on 12.1 percent of intake</strong>. Of its 3,389
+    overdue residential cases, 1,929 are more than a year past due and the median
+    is 420 days. A commitment exceeded by 420 days is not operative, and three
+    other building services show the same signature with almost nothing under a
+    year old.</figcaption>
+</figure>
+
+<div class="prose">
+<h3>5. Services with an unchanged commitment mostly improved</h3>
+</div>
+
+<figure>
+  <img src="assets/charts/05-stable-service-trend.png"
+       alt="Line chart of the on-time rate from 2023 to 2026 for the four Cincinnati 311 services whose committed completion time did not change during the period. Pothole repair, on a 12-day commitment, stays between 91 and 96.6 percent. Litter on private property and tall grass and weeds, both on 45 days, rise from the low 80s and mid 70s to the low 90s. Residential building inspection, on 365 days, rises from 44.8 percent in 2023 to 64.1 in 2024 then falls to 59.0 in 2025, and has no 2026 point because no request created in 2026 has reached its committed date.">
+  <figcaption>Only these four held the same committed time across the window, so
+    only these support a trend. Pothole repair absorbed a doubling of volume in
+    2025 with a three-point dip and recovered to 96.6 percent. Residential
+    inspection is the exception and did not improve.</figcaption>
+</figure>
+</section>
+
+<section id="ruled-out" class="prose">
+<h2>What I ruled out</h2>
+<p>Two things look like problems in the data and are not. Recommending action on
+   either would spend effort on a difference that does not reach residents.</p>
+
+<h3>Neighbourhood variation in pothole repair</h3>
+<p>On-time rates run 85.7 to 97.6 percent across 42 neighbourhoods, with a median
+   repair time of two to three days everywhere. The spread is statistically
+   detectable at these volumes and operationally trivial. The comparison holds
+   service mix constant by restricting to a single service: comparing
+   neighbourhoods across a mixed basket would confound what a neighbourhood
+   reports with how fast it is handled, which is the easiest way to turn an
+   operational finding into an unfounded claim about fairness.</p>
+
+<h3>Web self-service as a source of duplicate requests</h3>
+<p>Internet intake is 65.2 percent of volume with a 13.7 percent duplicate rate.
+   The 311 call centre is 22.2 percent of volume with <strong>14.4 percent</strong>,
+   slightly higher. The channel is not the cause. Duplicates concentrate in
+   property-condition services, from 15.0 percent for litter to 19.7 percent for
+   tall grass, consistent with several residents reporting the same visible
+   problem.</p>
+
+<h3>An outside explanation for 2025</h3>
+<p>A publicly reported figure attributed a reduction in illegal dumping to a local
+   programme. It was self-reported by the programme's operator with no stated
+   methodology, and the timing did not fit: the decline began before the
+   programme's season opened and the recovery came while it was still running. It
+   is not used.</p>
+</section>
+
+<section id="recommendation" class="prose">
+<h2>Recommendation and trade-offs</h2>
+
+<h3>Add seasonal bulky-collection capacity, June to September</h3>
+<p><strong>Target:</strong> restore July and August performance to the same year's
+   spring baseline. In 2026, spring ran at 94.9 percent and summer at 72.5 percent.
+   Closing that 22.4-point gap would have delivered roughly
+   <strong>1,568 additional requests on time</strong> across those two months.</p>
+<p><strong>Trade-off, stated plainly:</strong> the mechanism is not identified.
+   Volume is insufficient to explain the drop, and the likely causes, crew
+   availability during leave season, competing yard-waste and mowing work, heavier
+   summer item mix, vehicle availability, all require operational data the city
+   holds and this dataset does not. <strong>Run that diagnostic before committing
+   recurring spend.</strong> If the constraint is competing workload rather than
+   crew hours, the answer may be schedule sequencing at materially lower cost.</p>
+<p><strong>No cost estimate appears here.</strong> Crew hours, tonnage per run and
+   overtime rates belong to the department. This analysis establishes the size and
+   timing of the gap, not the price of closing it.</p>
+
+<h3>Do not lengthen the 14-day commitment</h3>
+<p>A 30-day commitment replaced it from roughly September 2025 to March 2026, then
+   reverted. It was in force only during the months when the service is naturally
+   fast: median collection times inside that window were 12, 6, 5, 5 and 4 days,
+   all of which would have met the original commitment.</p>
+<p>The 30-day requests show a 96 percent on-time rate against 42 percent for
+   14-day requests in the same year. <strong>That comparison is confounded and
+   should not be used.</strong> The tier and the season are entangled. Lengthening
+   the promise would raise the reported rate without changing when a resident's
+   furniture is collected.</p>
+
+<h3>Triage the building inspection backlog before discussing capacity</h3>
+<p>1,929 cases more than a year past a 365-day commitment are not a queue. A case
+   review establishing which represent live work and which are records that were
+   never closed out has to come first, and that distinction cannot be made from
+   this dataset.</p>
+</section>
+
+<section id="measure" class="prose">
+<h2>How to tell whether it worked</h2>
+<p><strong>Primary measure:</strong> the July and August on-time rate against the
+   same year's March to May baseline.</p>
+<p><strong>Why not year on year:</strong> the service improved substantially
+   between 2025 and 2026 for reasons unrelated to any intervention. Comparing 2027
+   summer against 2026 summer would credit the intervention with whatever that
+   underlying trend continues to deliver. Using the same year's spring as the
+   reference holds crew, fleet and process broadly constant and isolates the
+   seasonal gap.</p>
+<p><strong>What this design cannot do:</strong> a before-and-after comparison
+   cannot establish causation. Weather, staffing and demand all move these numbers
+   independently. For evidence of effect rather than association, stagger the
+   intervention across collection districts so the districts receiving it first
+   can be compared with those receiving it later. That is a decision to make
+   before implementation, not after.</p>
+</section>
+
+<section id="limits" class="prose">
+<h2>Limitations</h2>
+<ol>
+  <li><strong>The mechanism behind the summer failure is not identified.</strong>
+      Volume is insufficient; the rest requires data the city holds.</li>
+  <li><strong>No costs are estimated or assumed.</strong></li>
+  <li><strong>Closure codes are undefined by the publisher.</strong> Treating them
+      as completed service yields a citywide on-time rate of 72.5 percent. Under
+      the alternative reading that they represent no service delivered, it falls
+      to 61.2 percent. The headline should be read as a range.</li>
+  <li><strong>Trend reporting covers 13.3 percent of volume.</strong> Only four
+      services held a stable commitment; elsewhere a trend would mix a moving
+      promise into a performance measure.</li>
+  <li><strong>2026 is a partial year</strong>, January to August. Long-commitment
+      services have no mature 2026 cohort at all.</li>
+  <li><strong>Two neighbourhood fields disagree on 23.3 percent of records.</strong>
+      The documented field is used; the undocumented one is never mixed in.</li>
+  <li><strong>One city, one window, no causal claims.</strong></li>
+</ol>
+</section>
+
+<section id="build" class="prose">
+<h2>How it was built</h2>
+<p>Python and SQL throughout, with DuckDB as the engine. The pipeline runs in
+   sequence from a single command each: acquire, validate, define, model, analyse,
+   chart.</p>
+<ul>
+  <li><strong>Immutable snapshot.</strong> The raw extract is never edited. Each
+      pull writes a manifest recording the dataset id, the exact filter, the pull
+      timestamp, the row count and a SHA-256 hash.</li>
+  <li><strong>Definitions locked before any number was produced.</strong> A written
+      metric dictionary fixes the populations, the denominators and the exclusion
+      rules. The executable version is the same file the model and the analysis
+      both import, so one definition cannot drift into three.</li>
+  <li><strong>A tested dimensional model.</strong> A star schema at one row per
+      request, with a role-playing date dimension joined as created, due and
+      closed. Twenty tests run on every build and a failure stops it: grain,
+      referential integrity, key uniqueness, fan-out, and a reconciliation proving
+      the model reproduces the pre-model on-time rate to two decimal places.</li>
+  <li><strong>Exhaustive classification.</strong> All 517,287 records fall into
+      exactly one of seven outcome buckets, and the buckets are summed and
+      reconciled to the manifest on every run.</li>
+  <li><strong>Rates are never stored.</strong> The model holds additive counts and
+      divides after filtering, so a filtered total cannot produce an average of
+      percentages.</li>
+</ul>
+<p><a href="https://github.com/[YOUR-GITHUB]/cincy-311-service-performance">Code,
+   metric dictionary, validation log and analysis tables on GitHub</a></p>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>Data: City of Cincinnati 311 Non-Emergency Service Requests, retrieved
+       18 September 2026. Analysis and views are my own and are not affiliated
+       with or endorsed by the City of Cincinnati.</p>
+    <p><a href="index.html">Back to projects</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
